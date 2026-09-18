@@ -1,0 +1,12 @@
+aerohealth_dwh:
+  target: dev
+  outputs:
+    dev:
+      type: postgres
+      host: postgres_dwh   
+      user: admin
+      password: adminpassword
+      port: 5432           
+      dbname: aerohealth_dwh
+      schema: public
+      threads: 4

@@ -1,0 +1,15 @@
+.env
+
+data_lake/*.csv
+
+# Python
+__pycache__/
+*.pyc
+
+# dbt
+dbt_aerohealth/target/
+dbt_aerohealth/logs/
+dbt_aerohealth/dbt_packages/
+
+# Docker volumes
+*.log

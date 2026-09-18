@@ -1,0 +1,17 @@
+name: 'aerohealth'
+version: '1.0.0'
+config-version: 2
+
+profile: 'aerohealth_dwh'
+
+model-paths: ["models"]
+clean-targets:
+  - "target"
+  - "dbt_packages"
+
+models:
+  aerohealth:
+    staging:
+      +materialized: view
+    mart:
+      +materialized: table
