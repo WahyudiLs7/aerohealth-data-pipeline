@@ -13,5 +13,9 @@ models:
   aerohealth:
     staging:
       +materialized: view
+    intermediate:
+      +materialized: view
+    dimensional:
+      +materialized: table
     mart:
       +materialized: table

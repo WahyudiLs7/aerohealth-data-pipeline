@@ -14,6 +14,8 @@ x-airflow-common:
     MINIO_ENDPOINT: 'minio:9000'
     MINIO_ACCESS_KEY: '${MINIO_ROOT_USER}'
     MINIO_SECRET_KEY: '${MINIO_ROOT_PASSWORD}'
+    DWH_DB_USER: '${DWH_DB_USER}'
+    DWH_DB_PASSWORD: '${DWH_DB_PASSWORD}'
     
     _PIP_ADDITIONAL_REQUIREMENTS: pandas requests pytrends dbt-postgres minio
   volumes:
@@ -31,8 +33,8 @@ services:
   postgres:
     image: postgres:13
     environment:
-      POSTGRES_USER: airflow
-      POSTGRES_PASSWORD: airflow
+      POSTGRES_USER: ${AIRFLOW_DB_USER}
+      POSTGRES_PASSWORD: ${AIRFLOW_DB_PASSWORD}
       POSTGRES_DB: airflow
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -43,8 +45,8 @@ services:
   postgres_dwh:
     image: postgres:13
     environment:
-      POSTGRES_USER: admin
-      POSTGRES_PASSWORD: adminpassword
+      POSTGRES_USER: ${DWH_DB_USER}
+      POSTGRES_PASSWORD: ${DWH_DB_PASSWORD}
       POSTGRES_DB: aerohealth_dwh
     volumes:
       - postgres_dwh_data:/var/lib/postgresql/data

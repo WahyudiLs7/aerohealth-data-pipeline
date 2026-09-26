@@ -4,8 +4,8 @@ aerohealth_dwh:
     dev:
       type: postgres
       host: postgres_dwh   
-      user: admin
-      password: adminpassword
+      user: "{{ env_var('DWH_DB_USER') }}"
+      password: "{{ env_var('DWH_DB_PASSWORD') }}"
       port: 5432           
       dbname: aerohealth_dwh
       schema: public

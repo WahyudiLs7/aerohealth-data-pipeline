@@ -4,7 +4,9 @@ from sqlalchemy import create_engine
 from datetime import datetime
 
 def load_data():
-    db_url = 'postgresql://admin:adminpassword@postgres_dwh:5432/aerohealth_dwh'
+    db_user = os.environ.get('DWH_DB_USER')
+    db_password = os.environ.get('DWH_DB_PASSWORD')
+    db_url = f'postgresql://{db_user}:{db_password}@postgres_dwh:5432/aerohealth_dwh'
     engine = create_engine(db_url)
     
     tanggal_hari_ini = datetime.now().strftime('%Y%m%d')
