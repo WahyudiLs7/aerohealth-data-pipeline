@@ -17,7 +17,8 @@ Dibuat sebagai final project bootcamp **Data Engineering — Dibimbing.id (Batch
 - [Data Model (ERD)](#-data-model-erd)
 - [Cara Menjalankan](#-cara-menjalankan)
 - [Mengakses Tiap Layanan](#-mengakses-tiap-layanan)
-- [Alur Pipeline](#-alur-pipeline)
+- [Alur Pipeline (DAG)](#-alur-pipeline-dag)
+- [Keamanan Credential](#-keamanan-credential)
 - [Keterbatasan](#-keterbatasan)
 - [Rencana Pengembangan](#-rencana-pengembangan)
 - [Kontak](#-kontak)
@@ -39,15 +40,15 @@ Project ini membangun **single source of truth** berupa data warehouse yang tero
 ## 🏗️ Arsitektur
 
 ```
-┌─────────────┐   ┌──────────────┐   ┌─────────┐   ┌───────────┐   ┌───────────┐   ┌───────────┐
-│   Extract   │──▶│ Raw Zone     │──▶│  Load   │──▶│ Transform │──▶│ Transform │──▶│ Visualize │
-│  (Python)   │   │ (MinIO)      │   │(Postgres)│   │  (dbt)   │   │  (dbt)    │   │(Metabase) │
-└─────────────┘   └──────────────┘   └─────────┘   └───────────┘   └───────────┘   └───────────┘
-      │                                                  │               │
-   IQAir API                                        Staging (Silver)  Mart (Gold)
-   Google Trends API                                 int_health_*    dim_tanggal
-                                                                       dim_lokasi
-                                                                       fact_health_correlation
+┌─────────────┐   ┌──────────┐   ┌─────────┐   ┌──────────────────┐   ┌────────────┐   ┌───────────┐
+│   Extract   │──▶│ Raw Zone │──▶│  Load   │──▶│  Transform (dbt)  │──▶│  Transform │──▶│ Visualize │
+│  (Python)   │   │ (MinIO)  │   │(Postgres)│   │  Silver           │   │  Gold      │   │(Metabase) │
+└─────────────┘   └──────────┘   └─────────┘   └──────────────────┘   └────────────┘   └───────────┘
+      │                                              │                      │
+   IQAir API                                staging → intermediate    gold_health_
+   Google Trends API                          → dimensional            correlation
+                                            (dim_tanggal, dim_lokasi,   (flat, siap
+                                             fact_health_correlation)    dashboard)
 ```
 
 Seluruh pipeline diorkestrasi oleh **Apache Airflow**, berjalan di dalam kontainer **Docker**, dan dijadwalkan berjalan otomatis setiap hari (`@daily`).
@@ -57,8 +58,10 @@ Seluruh pipeline diorkestrasi oleh **Apache Airflow**, berjalan di dalam kontain
 | Layer | Isi | Tabel/Model |
 |---|---|---|
 | 🥉 **Bronze (Raw)** | Data mentah apa adanya dari API, diarsipkan di MinIO + PostgreSQL | `aerohealth-raw` bucket (MinIO), `raw_iqair`, `raw_google_trends` |
-| 🥈 **Silver (Staging + Intermediate)** | Tipe data dibersihkan, digabung, belum dimodelkan dimensional | `stg_iqair`, `stg_google_trends`, `int_health_correlation` |
-| 🥇 **Gold (Mart)** | Star schema siap pakai untuk dashboard | `dim_tanggal`, `dim_lokasi`, `fact_health_correlation` |
+| 🥈 **Silver (Staging → Intermediate → Dimensional)** | Tipe data dibersihkan, digabung, dimodelkan jadi star schema (fact + dimension) | `stg_iqair`, `stg_google_trends`, `int_health_correlation`, `dim_tanggal`, `dim_lokasi`, `fact_health_correlation` |
+| 🥇 **Gold (Mart)** | Tabel flat hasil join fact + dimension, siap pakai langsung oleh dashboard tanpa perlu join manual lagi | `gold_health_correlation` |
+
+> **Catatan desain:** Fact dan dimension table (star schema) ditempatkan di layer **Silver** karena masih berupa struktur normalized untuk fleksibilitas query. Layer **Gold** khusus untuk tabel yang benar-benar siap dikonsumsi langsung oleh tools BI seperti Metabase, tanpa perlu join tambahan di sisi dashboard.
 
 ---
 
@@ -82,28 +85,31 @@ Seluruh pipeline diorkestrasi oleh **Apache Airflow**, berjalan di dalam kontain
 ```
 aerohealth-pipeline/
 ├── dags/
-│   └── dag_kesehatan_harian.py       # Definisi DAG Airflow
+│   └── dag_kesehatan_harian.py       # Definisi DAG Airflow (10 task)
 ├── scripts/
-│   ├── ingest_iqair.py               # Extract data IQAir
-│   ├── ingest_trends.py              # Extract data Google Trends
+│   ├── ingest_iqair.py               # Extract data IQAir + upload ke MinIO
+│   ├── ingest_trends.py              # Extract data Google Trends + upload ke MinIO
 │   └── load_to_postgres.py           # Load CSV ke PostgreSQL
 ├── data_lake/                        # Staging file CSV lokal (sementara)
 ├── dbt_aerohealth/
 │   ├── models/
-│   │   ├── staging/                  # Layer Silver: cleaning
+│   │   ├── staging/                  # Silver: cleaning
 │   │   │   ├── stg_iqair.sql
 │   │   │   ├── stg_google_trends.sql
 │   │   │   └── sources.yml
-│   │   ├── intermediate/             # Layer Silver: join
+│   │   ├── intermediate/             # Silver: join
 │   │   │   └── int_health_correlation.sql
-│   │   └── mart/                     # Layer Gold: dimensional model
-│   │       ├── dim_tanggal.sql
-│   │       ├── dim_lokasi.sql
-│   │       └── fact_health_correlation.sql
+│   │   ├── dimensional/              # Silver: star schema
+│   │   │   ├── dim_tanggal.sql
+│   │   │   ├── dim_lokasi.sql
+│   │   │   └── fact_health_correlation.sql
+│   │   └── mart/                     # Gold: siap dashboard
+│   │       └── gold_health_correlation.sql
 │   ├── dbt_project.yml
-│   └── profiles.yml
+│   └── profiles.yml                  # Credential dibaca dari env_var()
 ├── docker-compose.yml
-├── .env.example                      # Template environment variable
+├── .env                               # Credential asli, TIDAK di-commit
+├── .env.example                       # Template environment variable
 ├── .gitignore
 └── README.md
 ```
@@ -112,7 +118,7 @@ aerohealth-pipeline/
 
 ## 🗂️ Data Model (ERD)
 
-Skema Gold layer (star schema):
+Skema Silver (star schema):
 
 ```mermaid
 erDiagram
@@ -147,6 +153,8 @@ erDiagram
 
 > Diagram di atas otomatis ter-render kalau dilihat langsung di GitHub (mendukung Mermaid).
 
+Di atas star schema ini, ada satu tabel **Gold** (`gold_health_correlation`) yang meng-JOIN ketiganya jadi satu tabel flat — inilah yang langsung dikonsumsi dashboard Metabase, tanpa perlu konfigurasi join tambahan di sisi BI tool.
+
 ---
 
 ## 🚀 Cara Menjalankan
@@ -177,6 +185,10 @@ Isi `.env`:
 IQAIR_API_KEY=isi_dengan_api_key_iqair_kamu
 MINIO_ROOT_USER=minioadmin
 MINIO_ROOT_PASSWORD=buat_password_sendiri_yang_aman
+AIRFLOW_DB_USER=airflow
+AIRFLOW_DB_PASSWORD=buat_password_sendiri
+DWH_DB_USER=admin
+DWH_DB_PASSWORD=buat_password_sendiri
 ```
 
 **3. Jalankan seluruh stack**
@@ -188,11 +200,11 @@ Tunggu beberapa menit sampai semua container hidup (bisa dicek dengan `docker ps
 
 **4. Trigger pipeline pertama kali**
 
-Buka Airflow UI di [http://localhost:8081](http://localhost:8081) (login: `airflow` / `airflow`), cari DAG `aerohealth_daily_ingestion`, nyalakan toggle-nya (kalau masih off), lalu klik tombol ▶️ untuk trigger manual.
+Buka Airflow UI di [http://localhost:8081](http://localhost:8081) (login: `airflow` / sesuai `.env`), cari DAG `aerohealth_daily_ingestion`, nyalakan toggle-nya (kalau masih off), lalu klik tombol ▶️ untuk trigger manual.
 
 **5. Lihat hasilnya di dashboard**
 
-Buka Metabase di [http://localhost:3000](http://localhost:3000), setup akun admin (hanya diminta sekali), hubungkan ke database `aerohealth_dwh` (host: `postgres_dwh`, port: `5432`, user & password sesuai `docker-compose.yml`), lalu jelajahi tabel `fact_health_correlation` untuk mulai membuat visualisasi.
+Buka Metabase di [http://localhost:3000](http://localhost:3000), setup akun admin (hanya diminta sekali), hubungkan ke database `aerohealth_dwh` (host: `postgres_dwh`, port: `5432`, credential sesuai `.env`), lalu jelajahi tabel **`gold_health_correlation`** untuk mulai membuat visualisasi (tabel ini sudah flat, tidak perlu join manual lagi).
 
 ---
 
@@ -200,28 +212,53 @@ Buka Metabase di [http://localhost:3000](http://localhost:3000), setup akun admi
 
 | Layanan | URL | Kredensial Default |
 |---|---|---|
-| Airflow UI | http://localhost:8081 | `airflow` / `airflow` |
+| Airflow UI | http://localhost:8081 | `airflow` / sesuai `.env` |
 | Metabase | http://localhost:3000 | Setup sendiri saat pertama buka |
 | MinIO Console | http://localhost:9003 | Sesuai `.env` (`MINIO_ROOT_USER` / `MINIO_ROOT_PASSWORD`) |
-| PostgreSQL (DWH) | `localhost:5433` | `admin` / `adminpassword` (database: `aerohealth_dwh`) |
+| PostgreSQL (DWH) | `localhost:5433` | Sesuai `.env` (`DWH_DB_USER` / `DWH_DB_PASSWORD`), database: `aerohealth_dwh` |
 
 ---
 
-## 🔄 Alur Pipeline
+## 🔄 Alur Pipeline (DAG)
 
-DAG `aerohealth_daily_ingestion` dijadwalkan berjalan otomatis setiap hari (`@daily`), dengan urutan task:
+DAG `aerohealth_daily_ingestion` dijadwalkan berjalan otomatis setiap hari (`@daily`), dengan **10 task** granular — dipecah per data source dan per tabel, supaya lineage-nya transparan di Airflow:
 
 ```
-fetch_iqair_pekanbaru  ─┐
-                         ├──▶ load_csv_to_postgres ──▶ dbt_run_staging ──▶ dbt_run_intermediate ──▶ dbt_run_mart
-fetch_google_trends_riau┘
+fetch_iqair_pekanbaru      ─┐
+                             ├─▶ load_csv_to_postgres
+fetch_google_trends_riau    ─┘        │
+                                       ├─▶ dbt_run_stg_iqair            ─┐
+                                       └─▶ dbt_run_stg_google_trends    ─┴─▶ dbt_run_intermediate
+                                                                                    │
+                                                        ┌───────────────────────────┤
+                                                        ▼                           ▼
+                                              dbt_run_dim_tanggal          dbt_run_dim_lokasi
+                                                        └─────────────┬─────────────┘
+                                                                      ▼
+                                                              dbt_run_fact
+                                                                      ▼
+                                                              dbt_run_gold
 ```
 
+**Penjelasan tahap:**
 1. **Extract** (paralel) — tarik data dari API IQAir dan Google Trends, simpan sebagai CSV lokal + upload ke MinIO sebagai raw zone
 2. **Load** — muat CSV ke tabel raw di PostgreSQL
-3. **Transform (Staging)** — bersihkan tipe data
-4. **Transform (Intermediate)** — gabungkan kedua sumber data per tanggal
-5. **Transform (Mart)** — bangun star schema (dimension + fact table) siap pakai dashboard
+3. **Staging** (paralel per source) — bersihkan tipe data masing-masing sumber
+4. **Intermediate** — gabungkan kedua sumber data per tanggal
+5. **Dimensional** (paralel per tabel) — bangun `dim_tanggal` dan `dim_lokasi`
+6. **Fact** — bangun `fact_health_correlation` mengacu ke kedua dimension
+7. **Gold** — bangun `gold_health_correlation`, tabel flat siap pakai dashboard
+
+---
+
+## 🔐 Keamanan Credential
+
+Semua credential (API key IQAir, kredensial MinIO, dan kredensial PostgreSQL) disimpan di file `.env` (tidak ikut ter-commit ke git, terdaftar di `.gitignore`) dan direferensikan lewat environment variable:
+- `docker-compose.yml` — pakai sintaks `${NAMA_VARIABLE}`
+- `load_to_postgres.py` — dibaca lewat `os.environ.get()`
+- `profiles.yml` (dbt) — dibaca lewat fungsi `env_var()`
+
+Kalau kamu clone repo ini, salin `.env.example` jadi `.env` dan isi dengan credential kamu sendiri sebelum menjalankan `docker compose up`.
 
 ---
 
@@ -230,13 +267,14 @@ fetch_google_trends_riau┘
 - **Limitasi data historis**: API gratis IQAir hanya menyediakan data real-time hari itu saja, tidak bisa mengambil data mundur ke belakang. Data historis kontinu baru terkumpul sejak pipeline dijalankan rutin.
 - **Resource lokal**: Karena dijalankan 100% on-premise via Docker, platform memakan resource CPU/RAM yang cukup tinggi.
 - **Sample size**: Korelasi yang ditampilkan di dashboard masih berdasarkan sample data yang terus bertambah harian — belum cukup untuk kesimpulan statistik yang kuat (belum ada perhitungan koefisien korelasi formal).
+- **Belum ada automated data quality testing** (misal Great Expectations atau dbt test) — validasi kualitas data saat ini masih berbasis null-handling dan agregasi manual di dbt.
 
 ---
 
 ## 🔮 Rencana Pengembangan
 
 - [ ] Migrasi infrastruktur orkestrasi dan data warehouse ke layanan cloud (GCP/AWS) untuk stabilitas production jangka panjang
-- [ ] Tambahkan `dbt test` untuk validasi data otomatis (not_null, unique, dsb.)
+- [ ] Tambahkan `dbt test` atau Great Expectations untuk validasi data otomatis
 - [ ] Tambahkan alerting (email/Slack) saat pipeline gagal
 - [ ] Perluas cakupan ke kota lain (multi-lokasi) memanfaatkan `dim_lokasi` yang sudah disiapkan
 - [ ] Tambahkan sumber data baru (curah hujan, data kasus ISPA riil) untuk analisis yang lebih kaya
